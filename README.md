@@ -24,8 +24,6 @@ src/
   museum/collisions.py     planta física, paredes, portas e deslizamento
   audio/sound_manager.py   áudio opcional e cache de durações
   graphics/raycaster.py    inspeção por raio contra bounding box
-  graphics/                câmera/renderizador legados reutilizáveis
-  entities/                entidades modulares originais reutilizáveis
 assets/images/             pinturas opcionais
 assets/audio/              oito narrações opcionais
 ```
@@ -36,7 +34,7 @@ assets/audio/              oito narrações opcionais
 |---|---|
 | Implementação modular (`src/`) | oito obras originais, imagens com fallback, cache e duração real do audioguia, roteiro, curadoria, tour, pausa, reinício, seleção anterior/próxima, HUD, créditos, raycaster e animações por `dt`. |
 | AP1 | projeção em perspectiva, cena 3D arquitetônica, salas, piso, teto, paredes, portais, pedestais, vitrine, molduras, spots, placas, navegação WASD/mouse, colisões e proximidade. |
-| Redundâncias | os antigos loops independentes e a antiga apresentação 2.5D foram substituídos pelo único controlador `Engine`; os recursos continuam disponíveis na mesma cena. |
+| Redundâncias | os antigos loops independentes, entidades 2.5D e componentes de interface foram removidos; a experiência usa apenas o controlador `Engine` e seus módulos ativos. |
 
 ## Planta e salas
 
@@ -74,11 +72,13 @@ As primeiras oito obras mantêm as faixas de áudio em `assets/audio`. O tour us
 | `M` | Alterna apresentação e navegação livre; no menu inicia exploração |
 | `W` `A` `S` `D` | Mover na navegação livre |
 | Mouse | Olhar (capturado na navegação livre) |
+| `Q` / `E` | Girar a câmera suavemente |
 | `N` / `B` ou setas | Próxima / anterior obra |
 | `C` | Alternar plano geral / foco detalhado com transição suave |
 | `Espaço` | Pausar ou retomar roteiro/tour/animações/áudio |
 | `R` | Reiniciar o modo atual |
 | `L` | Alternar raio de inspeção |
+| `I` | Ligar ou desligar as luzes das obras e da cena |
 | `K` | Créditos |
 | `ESC` | Voltar ao menu; no menu, sair |
 
@@ -87,9 +87,9 @@ A máquina de estados contém `MENU`, `EXPLORATION`, `BASIC_SCRIPT`, `CURATION`,
 ## Conceitos de Computação Gráfica
 
 - **Projeção perspectiva:** cada ponto do mundo é transladado para a câmera, rotacionado por yaw/pitch e projetado com `x/z` e `y/z`.
-- **Câmera:** transições exponenciais dependentes de `dt`; navegação livre com yaw/pitch.
+- **Câmera:** transições exponenciais dependentes de `dt`; rotação por Q/E e navegação livre com mouse/yaw/pitch.
 - **Colisões:** uma planta física com caixas 2D para paredes, divisórias, pedestais e vitrines impede passagem indevida e permite deslizar ao longo de obstáculos; os vãos dos portais permanecem atravessáveis.
-- **Iluminação procedural:** luz ambiente, spots de teto e destaque dourado para obra ativa/próxima.
+- **Iluminação procedural:** luz ambiente, spots de teto, intensidade por distância e destaque dourado para obra ativa/próxima; a tecla I alterna o sistema.
 - **Animação:** rotação do icosaedro, espiral animada, LEDs pulsantes e iluminação usam `dt`.
 - **Raycaster:** o raio horizontal da câmera testa caixas das obras, destaca a primeira peça atingida e identifica a inspeção no HUD.
 - **Performance:** imagens são carregadas antecipadamente, escalas de pintura são cacheadas por dimensão quantizada, áudio tem cache de duração e a geometria usa caixas/polígonos simples.

@@ -59,6 +59,20 @@ class EngineTests(unittest.TestCase):
         self.engine._close_credits()
         self.assertEqual(self.engine.state_machine.current, MuseumState.IMMERSIVE_TOUR)
 
+    def test_lights_toggle_and_mouse_rotates_camera(self):
+        self.engine._start(MuseumState.EXPLORATION)
+        self.assertTrue(self.engine.lights_enabled)
+        self.engine._event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_i))
+        self.assertFalse(self.engine.lights_enabled)
+        self.engine._event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_i))
+        self.assertTrue(self.engine.lights_enabled)
+
+        self.engine.mouse_grabbed = True
+        old_yaw = self.engine.yaw
+        self.engine._event(pygame.event.Event(pygame.MOUSEMOTION, rel=(20, -5)))
+        self.assertGreater(self.engine.yaw, old_yaw)
+        self.assertEqual(self.engine.target_yaw, self.engine.yaw)
+
 
 if __name__ == "__main__":
     unittest.main()

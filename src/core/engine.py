@@ -70,11 +70,19 @@ class Engine:
         self.paused_from: Optional[MuseumState] = None
         self.status = "PRONTO"
         self.ray_enabled = True
+        self.lights_enabled = True
         self.inspected_index: Optional[int] = None
         self.credits_return = MuseumState.MENU
         self.free_mode = False
         self.detail_focus = False
         self.image_cache = {}
+        self.text_cache = {}
+        self.hud_panel = pygame.Surface((self.WIDTH - 32, 76), pygame.SRCALPHA)
+        self.hud_panel.fill((9, 15, 25, 220))
+        self.credits_overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        self.credits_overlay.fill((5, 9, 16, 238))
+        self.lights_off_overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        self.lights_off_overlay.fill((0, 0, 8, 145))
         self.mouse_grabbed = False
         self.time = 0.0
         self.camera_pos = [0.0, 1.2, -8.0]
@@ -163,7 +171,9 @@ class Engine:
             return False
         if event.type == pygame.MOUSEMOTION and self.free_mode and self.mouse_grabbed:
             self.yaw += event.rel[0] * .0035
+            self.target_yaw = self.yaw
             self.pitch = max(-1.0, min(1.0, self.pitch - event.rel[1] * .0035))
+            self.target_pitch = self.pitch
         if event.type != pygame.KEYDOWN:
             return True
         key, state = event.key, self.state_machine.current
@@ -204,6 +214,9 @@ class Engine:
             self._focus_active(detail=self.detail_focus)
         elif key == pygame.K_l:
             self.ray_enabled = not self.ray_enabled
+        elif key == pygame.K_i:
+            self.lights_enabled = not self.lights_enabled
+            self.status = "LUZES LIGADAS" if self.lights_enabled else "LUZES DESLIGADAS"
         elif key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4):
             ranges = {pygame.K_1: 0, pygame.K_2: 8, pygame.K_3: 4, pygame.K_4: 6}
             self._select(ranges[key], focus=True)
@@ -267,6 +280,7 @@ class Engine:
         self.time += dt
         state = self.state_machine.current
         if state == MuseumState.PAUSED: return
+        self._rotate_camera(dt)
         if self.free_mode:
             self._move(dt)
             near = self._nearest_exhibit(4.0)
@@ -292,6 +306,12 @@ class Engine:
         for i in range(3): self.camera_pos[i] += (self.camera_target[i] - self.camera_pos[i]) * blend
         self.yaw += (self.target_yaw - self.yaw) * blend
         self.pitch += (self.target_pitch - self.pitch) * blend
+
+    def _rotate_camera(self, dt):
+        """Gira a câmera suavemente com Q/E em qualquer modo de visita."""
+        keys = pygame.key.get_pressed()
+        rotation = (int(keys[pygame.K_e]) - int(keys[pygame.K_q])) * 1.8 * dt
+        self.target_yaw += rotation
 
     def _move(self, dt):
         keys = pygame.key.get_pressed(); speed = 6.0 * dt
@@ -375,12 +395,21 @@ class Engine:
         for name, p, color in (("GALERIA CLÁSSICA",(0,3.2,10),(222,185,115)),("ANTIGUIDADE",(-17,3.2,10),(235,181,105)),("MATEMÁTICA",(-3,3.2,27),(150,220,205)),("TECNOLOGIA",(16,3.2,27),(125,195,245))): self._draw_world_label(name,p,color)
         for index, exhibit in sorted(enumerate(self.EXHIBITS), key=lambda item: -math.dist(self.camera_pos, item[1].pos)):
             self._draw_exhibit(exhibit, index == self.active_index or index == self.inspected_index)
+        if not self.lights_enabled:
+            self.screen.blit(self.lights_off_overlay, (0, 0))
 
     def _draw_exhibit(self, e, active):
         x,y,z=e.pos; glow = (255,215,100) if active else (125,145,165)
+        distance = math.hypot(x - self.camera_pos[0], z - self.camera_pos[2])
+        light = max(.48, 1.0 - distance / 72.0) if self.lights_enabled else .28
+
+        def shade(color):
+            return tuple(max(0, min(255, int(channel * light))) for channel in color)
+
+        glow = shade(glow)
         # spot no teto e cone leve
         top, target = self._project((x,3.9,z-.5)), self._project((x,y,z))
-        if top and target:
+        if self.lights_enabled and top and target:
             pygame.draw.line(self.screen, glow, top[:2], target[:2], 2 if active else 1)
             pygame.draw.circle(self.screen, glow, top[:2], 5 if active else 3)
         if e.kind == "painting":
@@ -393,47 +422,52 @@ class Engine:
                 if maxx-minx>8 and maxy-miny>8:
                     # Quantização evita redimensionamento em todos os frames durante uma transição.
                     size = (max(8, ((maxx-minx + 3) // 8) * 8), max(8, ((maxy-miny + 3) // 8) * 8))
-                    cache_key = (e.image, size, active)
+                    light_level = int(light * 20)
+                    cache_key = (e.image, size, active, light_level)
                     scaled = self.image_cache.get(cache_key)
                     if scaled is None:
                         scaled = pygame.transform.smoothscale(image, size)
                         if not active:
                             scaled.set_alpha(150)
+                        if light_level < 20:
+                            scaled = scaled.copy()
+                            brightness = max(0, min(255, int(light * 255)))
+                            scaled.fill((brightness, brightness, brightness), special_flags=pygame.BLEND_RGB_MULT)
                         self.image_cache[cache_key] = scaled
                     self.screen.blit(scaled,(minx,miny))
             else: self._poly(corners, (78,104,125) if active else (48,60,71))
         elif e.kind in ("icosa","spiral"):
-            self._box(x,-.4,z,1.5,.65,1.5,(75,86,101))
+            self._box(x,-.4,z,1.5,.65,1.5,shade((75,86,101)))
             center=self._project((x,1,z))
             if center:
                 if e.kind=="icosa":
                     pts=[]
                     for i in range(10):
                         a=self.time+i*math.tau/10; pts.append((center[0]+math.cos(a)*55,center[1]+math.sin(a)*55))
-                    pygame.draw.lines(self.screen,glow,True,pts,2)
+                    pygame.draw.lines(self.screen, glow, True, pts, 2)
                 else:
-                    pts=[(center[0]+math.cos(self.time+t)*t*5,center[1]+math.sin(self.time+t)*t*5) for t in [i*.18 for i in range(55)]]; pygame.draw.lines(self.screen,(100,230,180),False,pts,2)
+                    pts=[(center[0]+math.cos(self.time+t)*t*5,center[1]+math.sin(self.time+t)*t*5) for t in [i*.18 for i in range(55)]]; pygame.draw.lines(self.screen,shade((100,230,180)),False,pts,2)
         elif e.kind=="server":
-            self._box(x,1,z,1.3,2.2,.7,(35,53,70)); c=self._project((x,1,z-.75))
+            self._box(x,1,z,1.3,2.2,.7,shade((35,53,70))); c=self._project((x,1,z-.75))
             if c:
                 for row in range(6):
-                    for col in range(3): pygame.draw.circle(self.screen,(70,int(150+90*(math.sin(self.time*4+row+col)+1)/2),160),(c[0]-24+col*24,c[1]-48+row*18),3)
+                    for col in range(3): pygame.draw.circle(self.screen,shade((70,int(150+90*(math.sin(self.time*4+row+col)+1)/2),160)),(c[0]-24+col*24,c[1]-48+row*18),3)
         elif e.kind=="turing":
-            self._box(x,.1,z,2.4,.55,.5,(66,76,89)); c=self._project((x,.1,z-.55))
+            self._box(x,.1,z,2.4,.55,.5,shade((66,76,89))); c=self._project((x,.1,z-.55))
             if c:
                 offset = int((self.time * 24) % 14)
-                for i in range(10): pygame.draw.circle(self.screen,(215,210,180),(c[0]-65 + i*14 + offset,c[1]),4)
+                for i in range(10): pygame.draw.circle(self.screen,shade((215,210,180)),(c[0]-65 + i*14 + offset,c[1]),4)
         elif e.kind=="bust":
-            self._box(x,-.5,z,1.25,.6,1.25,(170,175,180))
+            self._box(x,-.5,z,1.25,.6,1.25,shade((170,175,180)))
             vertices, faces = self.nefertiti_mesh
             angle = self.time * .22
             world = [(x + (vx * math.cos(angle) - vz * math.sin(angle))*.9, .1 + vy*.9,
                       z + (vx * math.sin(angle) + vz * math.cos(angle))*.9) for vx,vy,vz in vertices]
             for face in faces:
                 if all(index < len(world) for index in face):
-                    self._poly([world[index] for index in face], (220,198,161), 1)
+                    self._poly([world[index] for index in face], shade((220,198,161)), 1)
         else:
-            self._box(x,-.2,z,2.4,.7,1.3,(100,57,33)); self._box(x,.7,z,2.0,.25,1.0,(165,130,70))
+                self._box(x,-.2,z,2.4,.7,1.3,shade((100,57,33))); self._box(x,.7,z,2.0,.25,1.0,shade((165,130,70)))
         self._draw_world_label(e.title,(x,-1.0,z-1.1),glow)
 
     def _draw_world_label(self, text, pos, color):
@@ -441,7 +475,12 @@ class Engine:
         if p and 0 <= p[0] < self.WIDTH: self._text(self.small,text,(p[0],p[1]),color,center=True)
 
     def _text(self,font,text,pos,color=(235,240,245),center=False):
-        surf=font.render(text,True,color); self.screen.blit(surf,(pos[0]-surf.get_width()//2 if center else pos[0],pos[1]))
+        key = (id(font), text, color)
+        surf = self.text_cache.get(key)
+        if surf is None:
+            surf = font.render(text, True, color)
+            self.text_cache[key] = surf
+        self.screen.blit(surf,(pos[0]-surf.get_width()//2 if center else pos[0],pos[1]))
 
     def _draw_menu(self):
         self.screen.fill((10,16,27)); self._text(self.title_font,"MUSEU VIRTUAL DE COMPUTAÇÃO GRÁFICA",(self.WIDTH//2,92),(255,208,75),True)
@@ -451,12 +490,12 @@ class Engine:
         self._text(self.small,"Python + Pygame • projeção perspectiva matemática • sem OpenGL",(self.WIDTH//2,self.HEIGHT-65),(140,165,190),True)
 
     def _draw_hud(self):
-        panel=pygame.Surface((self.WIDTH-32,76),pygame.SRCALPHA); panel.fill((9,15,25,220)); self.screen.blit(panel,(16,12))
+        self.screen.blit(self.hud_panel, (16, 12))
         mode={MuseumState.EXPLORATION:"Navegação Livre",MuseumState.BASIC_SCRIPT:"Roteiro Básico",MuseumState.CURATION:"Curadoria Interativa",MuseumState.IMMERSIVE_TOUR:"Tour Imersivo",MuseumState.PAUSED:"Pausado",MuseumState.COMPLETED:"Concluído"}.get(self.state_machine.current,"Visita")
         self._text(self.font,"MUSEU VIRTUAL DE COMPUTAÇÃO GRÁFICA",(30,22),(255,207,80)); self._text(self.small,f"Modo: {mode} | Sala: {self.active.room} | Estado: {self.status}",(30,49))
         self._text(self.small,f"Obra: {self.active.title} — {self.active.author}",(550,49),(210,230,245))
         progress=(self.tour_time/self.tour_total if self.state_machine.current==MuseumState.IMMERSIVE_TOUR else (self.active_index+1)/len(self.EXHIBITS)); pygame.draw.rect(self.screen,(45,55,68),(30,self.HEIGHT-25,self.WIDTH-60,8)); pygame.draw.rect(self.screen,(100,195,225),(30,self.HEIGHT-25,int((self.WIDTH-60)*min(1,progress)),8))
-        near=self._nearest_exhibit(4.0); hint="WASD + mouse: mover e olhar | M: alternar navegação/apresentação" if self.free_mode else "N/B: obras | C: foco | Espaço: pausar | R: reiniciar | M: navegação | K: créditos"
+        near=self._nearest_exhibit(4.0); hint="WASD + mouse: mover e olhar | Q/E: girar câmera | I: luzes | M: alternar modo" if self.free_mode else "N/B: obras | Q/E: girar câmera | I: luzes | Espaço: pausar | K: créditos"
         if near is not None: hint=f"Próximo à obra: {self.active.title}. {hint}"
         self._text(self.small,hint,(30,self.HEIGHT-52),(255,224,160) if near is not None else (210,220,230))
         if self.ray_enabled:
@@ -466,7 +505,7 @@ class Engine:
                 self._text(self.small, f"Raio: {self.EXHIBITS[self.inspected_index].title}", (self.WIDTH//2 + 12, self.HEIGHT//2 - 9), ray_color)
 
     def _draw_credits(self):
-        overlay=pygame.Surface((self.WIDTH,self.HEIGHT),pygame.SRCALPHA); overlay.fill((5,9,16,238)); self.screen.blit(overlay,(0,0))
+        self.screen.blit(self.credits_overlay, (0, 0))
         self._text(self.title_font,"CRÉDITOS E REFERÊNCIAS",(self.WIDTH//2,70),(255,207,80),True)
         lines=("Projeto acadêmico: Museu Virtual de Computação Gráfica","Tecnologia: Python 3 + Pygame; primitivas 2D e projeção perspectiva.","Acervo integrado: pinturas, matemática, tecnologia e antiguidade.","A Ilha dos Mortos — Arnold Böcklin (1880), domínio público.","Busto de Nefertiti — referência de digitalização Fraunhofer IGD / CultLab3D (CC BY-NC).","Papiro de Ani — British Museum / Wikimedia Commons.","Integrantes e papéis: preencher conforme a equipe acadêmica.","","K ou ESC — retornar ao museu.")
         for i,line in enumerate(lines): self._text(self.font,line,(100,160+i*42),(220,230,242))
